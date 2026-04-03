@@ -1,0 +1,191 @@
+---
+sidebar_position: 3
+---
+
+import AlgorithmDemo from '@site/src/components/AlgorithmDemo';
+import AntiUnifTreeView from '@site/src/components/AntiUnifTreeView';
+import AntiUnifPhaseViz from '@site/src/components/AntiUnifPhaseViz';
+
+export const renderViz = (step, idx, all) => (
+  <div>
+    <AntiUnifPhaseViz step={step} allSteps={all} currentIndex={idx} />
+    <AntiUnifTreeView step={step} allSteps={all} currentIndex={idx} />
+  </div>
+);
+
+# Anti-Unification (LGG)
+
+Anti-unification computes the **Least General Generalization** (LGG) of two or more expressions. It was introduced independently by Plotkin (1970) and Reynolds (1970) as a method for inductive inference: given concrete examples, find the most specific pattern that covers all of them.
+
+Where *unification* finds the most general common *instance* of two terms (making them equal by substituting variables), anti-unification finds the most specific common *generalization* (making them equal by abstracting differing subterms into variables). The two operations are dual in the lattice of terms ordered by subsumption.
+
+Our implementation adapts this idea from first-order terms to DOM trees, keeping common structure and replacing differing text, tail, and attribute values with named variables.
+
+## Theoretical Background
+
+### Generality and Subsumption
+
+Plotkin defines a quasi-ordering on terms: a term *s* is **more general** than a term *t* (written *s* &le; *t*) if there exists a substitution &sigma; such that *s*&sigma; = *t*. For example, `f(x, g(x))` is more general than `f(a, g(a))` because the substitution `x := a` makes them equal. This ordering captures "how specific" a pattern is.
+
+In our implementation, a template with a variable slot at some position is more general than one with a fixed literal there, since the variable can be instantiated to any value, including that literal.
+
+### Least General Generalization
+
+Given a set of terms *K*, a term *W* is a **least generalization** of *K* if:
+
+1. *W* is a generalization of every term in *K* (i.e., *W* &le; *V* for every *V* in *K*), and
+2. *W* is the most specific such generalization (if *W*&prime; &le; *V* for every *V* in *K*, then *W*&prime; &le; *W*).
+
+Plotkin proved that any two compatible terms have an LGG, and that it is **unique up to variable renaming** (Theorem 1). This means the result is canonical -- different execution orders may produce different variable names, but the structure of the generalization is the same.
+
+In our DOM setting, the LGG of two pages is the template that keeps every position where the pages agree and introduces a variable at every position where they differ.
+
+### Plotkin's Algorithm (Theorem 1)
+
+Plotkin gives a constructive algorithm for computing the LGG of two terms *W*&#8321; and *W*&#8322;:
+
+1. Set *V*&#8321; = *W*&#8321;, *V*&#8322; = *W*&#8322;. Initialize empty substitutions &epsilon;&#8321;, &epsilon;&#8322;.
+2. Find subterms *t*&#8321;, *t*&#8322; that occur at the same position in *V*&#8321;, *V*&#8322;, are not equal, and where either they have different root function symbols or at least one is a variable.
+3. If no such pair exists, *V*&#8321; = *V*&#8322; and this is the LGG.
+4. Choose a fresh variable *x*. Everywhere *t*&#8321; and *t*&#8322; appear at the same position in *V*&#8321; and *V*&#8322;, replace both with *x*.
+5. Record the replacement in &epsilon;&#8321; and &epsilon;&#8322;.
+6. Go to step 2.
+
+Plotkin proves this terminates because a **difference function** (the count of replaceable position pairs) strictly decreases at each step.
+
+Our `_anti_unify` function implements a single-pass variant of this: it walks the template and page trees in parallel, and wherever a slot value differs, it replaces the position with a fresh variable (`var_0`, `var_1`, ...). The substitutions &epsilon;&#8321; and &epsilon;&#8322; correspond to the extraction maps that recover data from new pages.
+
+### The `_Slot` Representation
+
+Plotkin's algorithm replaces differing subterms with variables and records the original values in substitutions. Our implementation represents this with `_Slot = tuple[bool, str]`:
+
+- **Fixed slot** `(True, "literal")` -- a position where all training pages had the same value. This corresponds to a shared subterm that was never replaced.
+- **Variable slot** `(False, "var_0")` -- a position where values differed across pages. This corresponds to a variable introduced by step 4 of the algorithm. The substitutions &epsilon;&#8321;, &epsilon;&#8322;, ... are recovered at extraction time by reading the actual value from a new page at this position.
+
+### Pairwise Fold for N Inputs
+
+Plotkin proves (p. 156) that for a set of *n* terms, the LGG can be computed by nested binary applications:
+
+> lgg(*W*&#8321;, lgg(*W*&#8322;, ..., lgg(*W*&#8319;&#8331;&#8321;, *W*&#8319;) ...))
+
+This is the **pairwise fold** strategy. The first page initializes a fully-fixed template; each subsequent page is folded against the current template, potentially turning fixed slots into variables. Since `lgg` is associative and commutative up to variable renaming, the final set of fixed vs. variable positions is the same regardless of page order, though variable *names* may differ.
+
+In the interactive trace, each fold is shown in two steps:
+- **Compare**: the current template and incoming page side-by-side, with mismatching positions highlighted in red.
+- **Fold**: the merged result, with newly created variables highlighted in orange.
+
+### Compatibility
+
+Plotkin's Theorem 1 requires that the input terms are **compatible**: they must share the same root function symbol and arity. In the DOM setting, this means the root elements must have the same tag and the same set of attribute names. If two pages have incompatible root elements, no LGG exists, and the algorithm returns `EmptyTemplate`.
+
+More precisely, at each node the algorithm checks tag equality and attribute-name equality before attempting to merge. A mismatch at any node causes that subtree to collapse into a single variable (or the entire template to fail if it occurs at the root).
+
+## Extension to Unranked Trees (UFOG)
+
+Standard first-order anti-unification (FOSG) assumes **ranked** terms: every function symbol has a fixed arity. DOM trees violate this -- a `<div>` may have 2 children on one page and 5 on another.
+
+Cerna and Kutsia (2023, Section 3.4) survey **Unranked First-Order Generalization (UFOG)**, where symbols can have variable arity. Unranked languages introduce **hedge variables** that stand for sequences of children (possibly empty), alongside individual variables that stand for single terms. For example, generalizing the child sequences `(a, b, c, a, b)` and `(a, b, a, b)` might yield the pattern `(X, a, b)` where the hedge variable *X* absorbs a variable-length prefix.
+
+### The Rigid Variant and LCS
+
+Kutsia et al. (2014) define the **rigid** variant of UFOG, which forbids adjacent hedge variables in the generalization. This makes the problem finitary (finitely many solutions) and connects it to the **longest common subsequence (LCS)**: the rigidity function computes common subsequences of top-level symbols to identify the shared *backbone* of children.
+
+Our implementation follows this approach:
+1. **Tag-frequency analysis**: identify which child tags have different counts across pages (these are "variable-count" tags).
+2. **LCS backbone**: compute the longest common subsequence of the *stable* tags (those with matching counts). This is the rigid backbone -- the fixed skeleton of children that appears in every page.
+3. **Gap analysis**: children between backbone positions are classified as *repeating regions* (the tag appears multiple times, corresponding to a hedge variable that absorbs loop iterations) or *optional regions* (the tag appears in some pages but not others, corresponding to a conditional).
+
+This is a practical adaptation of the rigid UFOG framework to HTML template inference. The backbone corresponds to the common subsequence selected by the rigidity function; repeating and optional regions correspond to hedge variables constrained to specific tag patterns.
+
+### Hedge Variables in Our Representation
+
+In the formal UFOG framework, a hedge variable *X* matches any sequence of sibling terms. In our `_TplNode` representation:
+
+- `children: None` with `children_var: "var_5"` -- the entire children region is a single hedge variable. This is the fallback when no structure can be recovered.
+- `repeating_regions: [(pos, template, "var_3")]` -- a constrained hedge variable: it matches zero or more children at position *pos* in the backbone, each conforming to *template*.
+- `optional_regions: [(pos, templates)]` -- a hedge variable that matches zero or one occurrence of the given templates.
+
+These are more structured than unconstrained hedge variables, which is why the algorithm can still extract data from the matched regions.
+
+## How It Works
+
+### 1. Initial Template
+
+The first training page is converted into a **fully-fixed template tree** -- every text, tail, and attribute position is marked as fixed with its literal value.
+
+### 2. Pairwise Fold
+
+For each subsequent page, the algorithm walks the current template and the new page in parallel:
+- If a **text/tail/attribute** value matches the template's fixed value, it stays fixed.
+- If it **differs**, the position becomes variable and gets a new name (`var_0`, `var_1`, ...). This is the variable-introduction step from Plotkin's algorithm.
+- If already variable from a previous fold, it stays variable.
+- If **child counts differ**, the algorithm attempts LCS-based region detection (the rigid UFOG approach). If that fails, the entire children region becomes a hedge variable.
+
+### 3. Region Detection (LCS Backbone)
+
+When child counts differ between the template and a new page, the algorithm:
+1. Computes tag frequencies for both child sequences.
+2. Identifies **variable-count tags** (tags whose frequency differs).
+3. Filters these out and computes the **LCS of stable tags** as the backbone.
+4. Maps each child sequence to backbone positions.
+5. Analyzes gaps between backbone children to find repeating and optional regions.
+
+This step is visible in the trace as a separate phase when it occurs.
+
+### 4. Result
+
+After folding all pages, the template tree contains:
+- **Fixed slots** (green): positions where all pages had the same value.
+- **Variable slots** (orange): positions where values differed across pages.
+- **Repeating regions**: children that appear a variable number of times (loops).
+- **Optional regions**: children present in some pages but not others (conditionals).
+
+## Interactive Demo
+
+<AlgorithmDemo
+  algorithm="anti_unification"
+  renderViz={renderViz}
+  defaultPages={[
+    '<div><h1>Welcome</h1><p>Hello Alice</p></div>',
+    '<div><h1>Welcome</h1><p>Hello Bob</p></div>',
+    '<div><h1>Welcome</h1><p>Hello Carol</p></div>',
+  ]}
+/>
+
+## Key Properties
+
+| Property | Description |
+|----------|-------------|
+| **Pairwise fold** | Computes lgg(*W*&#8321;, lgg(*W*&#8322;, ...)) following Plotkin's proof for *n* inputs. Result positions (fixed vs. variable) are order-independent; variable names may differ. |
+| **Conservative** | Always produces a valid generalization -- never claims a position is fixed when it varies across training data. |
+| **Tree-structural** | Preserves full DOM hierarchy. Each node is independently generalized. |
+| **Compatibility required** | Pages must share the same tag at each position. Incompatible pages produce `EmptyTemplate`. |
+| **LCS child alignment** | Handles variable-arity children via rigid UFOG (LCS backbone + gap analysis), not just positional matching. |
+| **Unique up to renaming** | The set of fixed vs. variable positions is deterministic; only variable names depend on fold order. |
+
+## Comparison with the Formal Theory
+
+| Paper concept | Implementation |
+|---------------|---------------|
+| First-order terms | DOM tree nodes (`_TplNode`) |
+| Function symbol + arity | Element tag + sorted attribute names |
+| Subterms at each position | `.text`, `.tail`, `.attrs[name]` slots |
+| Variable substitution &sigma; | `_Slot(False, "var_N")` -- extraction recovers the substitution from a new page |
+| Replaceable term pairs | Mismatches found during parallel tree walk (visible in the "compare" trace step) |
+| Fresh variable introduction | `_Counter.next()` generating `var_0`, `var_1`, ... |
+| Compatibility condition | Tag and attribute-name equality check at each node |
+| Pairwise fold (Plotkin p.156) | `AntiUnificationInferer.infer()` loop over pages |
+| Ranked arity | Fixed child count (standard FOSG case) |
+| Hedge variables (UFOG) | `children_var`, `repeating_regions`, `optional_regions` |
+| LCS rigidity function | `lcs()` on stable tag sequences in `_try_detect_regions` |
+
+## References
+
+- G. D. Plotkin, "A Note on Inductive Generalization," *Machine Intelligence 5*, Edinburgh University Press, 1970, pp. 153-163.
+- J. C. Reynolds, "Transformational systems and the algebraic structure of atomic formulas," *Machine Intelligence 5*, Edinburgh University Press, 1970, pp. 135-151.
+- D. M. Cerna and T. Kutsia, "Anti-unification and Generalization: A Survey," *Proceedings of the 32nd International Joint Conference on Artificial Intelligence (IJCAI-23)*, Survey Track, 2023, pp. 6563-6571.
+- T. Kutsia, J. Levy, and M. Villaret, "Anti-unification for unranked terms and hedges," *Journal of Automated Reasoning*, 52(2), 2014, pp. 155-190.
+
+## Source Code
+
+[`westlean/algorithms/anti_unification.py`](https://github.com/freelawproject/westlean/blob/main/westlean/algorithms/anti_unification.py)
