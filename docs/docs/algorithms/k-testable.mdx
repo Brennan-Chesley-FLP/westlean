@@ -1,0 +1,175 @@
+---
+sidebar_position: 6
+---
+
+import AlgorithmDemo from '@site/src/components/AlgorithmDemo';
+import SequenceAlignment from '@site/src/components/SequenceAlignment';
+import SlotInspector from '@site/src/components/SlotInspector';
+import TreeAlgoPhaseViz from '@site/src/components/TreeAlgoPhaseViz';
+
+export const phaseLabels = {
+  structure_analysis: "Structure",
+  child_alignment: "Alignment",
+  template_tree: "Template",
+  generalization: "Generalize",
+  result: "Result",
+};
+
+export const renderViz = (step, idx, all) => (
+  <div>
+    <TreeAlgoPhaseViz step={step} allSteps={all} currentIndex={idx} />
+    <SequenceAlignment step={step} allSteps={all} currentIndex={idx} />
+    <SlotInspector step={step} allSteps={all} currentIndex={idx} />
+  </div>
+);
+
+# k-Testable Tree Automata
+
+The k-testable tree automaton learns a template by inspecting local tree fragments of bounded height. The approach is based on **local unranked tree automaton inference** (Kosala et al., IJCAI 2003; Kosala et al., Data & Knowledge Engineering 2006), which extends the classical k-testable tree language framework from ranked to unranked trees and applies it to information extraction from structured documents.
+
+## Theoretical Background
+
+### k-Testable Tree Languages
+
+A **k-testable tree language** is a set of trees whose membership can be determined entirely by examining all subtree fragments of height at most *k*. The concept was introduced by Garcia & Oncina (1993) for ranked trees and later extended to unranked trees by Kosala et al.
+
+Given a tree *t*, three sets of fragments define a k-testable language:
+
+- **k-roots** `r_k(t)`: the tree cut off at height *k* (the "top" of the tree)
+- **k-forks** `f_k(t)`: all subtrees of height at least *k*, each cut off at height *k* (the "middle" fragments)
+- **k-subtrees** `s_k(t)`: all subtrees of height at most *k* (the "bottom" fragments)
+
+A new tree is accepted if and only if its k-root, all its k-forks, and all its k-subtrees were observed in the training data. This makes the automaton **locally testable**: acceptance depends only on what small neighborhoods look like, not on global tree structure.
+
+### Position in the Chomsky Hierarchy for Trees
+
+k-testable tree languages sit strictly below the regular tree languages in expressive power. Just as k-testable string languages are a proper subset of regular string languages, k-testable tree languages are a proper subset of recognizable tree languages. They can be identified in the limit from positive examples only (Theorem 1, Kosala et al. IJCAI 2003), which is a stronger learnability guarantee than what regular tree languages offer.
+
+### Unranked Tree Automata (UTA)
+
+In HTML and XML documents, tags are **unranked**: a `<ul>` can have any number of `<li>` children. Classical tree automata require ranked alphabets (each label has a fixed arity). The Kosala et al. IJCAI 2003 paper introduced a key innovation: **local unranked tree automata** where transitions have the form:
+
+```
+v(e) -> q
+```
+
+Here *v* is a node label, *q* is a state, and *e* is a **regular expression over states** that describes acceptable child state sequences. This replaces the fixed-arity tuple `(v, q1, ..., qk) -> q` of ranked automata. The UTA processes trees bottom-up: leaf nodes are assigned states based on their label, then internal nodes are assigned states based on their label and whether their children's state sequence matches the transition's regular expression.
+
+A tree is **accepted** if the state assigned to its root is a final (accepting) state.
+
+### The k Parameter
+
+The parameter *k* controls the trade-off between precision and recall:
+
+- **Small k (e.g., k=2)**: Each pattern captures only parent-children relationships. The automaton generalizes aggressively, potentially accepting pages that don't match the template (lower precision, higher recall).
+- **Large k (e.g., k=5)**: Patterns capture deeper context (parent-children-grandchildren and beyond). The automaton becomes very specific, potentially rejecting valid pages with minor structural variation (higher precision, lower recall).
+
+In the original papers, *k* is selected via cross-validation. The F1-score typically rises with *k* until a peak (often at k=2 to k=4 for unranked trees) and then declines as the automaton becomes too specific.
+
+### Generalization Strategies
+
+The base k-testable algorithm can be too conservative (high precision but low recall). The papers describe two generalization approaches:
+
+- **g-testable** (Kosala et al. 2006, Section 3.4.3): Parameterized by level *l*. Replaces node labels at distance >= *l* from the root with wildcards, relaxing transitions from forks that are far from the extraction target.
+- **gl-testable** (Kosala et al. 2006, Section 3.4.4): Uses an exhaustive search through a partial order of generalizations, replacing labels at the bottommost tree levels with wildcards while checking that each generalization does not cause overgeneralization by covering target forks.
+
+Both methods improve recall at the cost of some precision.
+
+## Our Implementation
+
+Our implementation is **inspired by** the UTA framework but takes a practical approach suited to multi-slot template inference (extracting many fields simultaneously rather than one at a time). Instead of maintaining explicit pattern sets and a formal automaton, we build a **recursive template tree** that captures the same structural constraints.
+
+### How It Works
+
+#### 1. Structure Analysis
+
+Verify that all training pages share the same root tag and attribute names. Collect the child tag sequences from each page, which will be aligned in the next step.
+
+#### 2. Child Alignment (LCS Backbone)
+
+This is where our approach diverges most from the original paper. Rather than collecting k-subtree patterns and using k-contextual DFA inference for the regular expression component of transitions, we use **Longest Common Subsequence (LCS) alignment** of child tag sequences at each tree level.
+
+The alignment produces:
+- A **backbone**: the common child subsequence present in all pages (analogous to the stable transitions in a UTA)
+- **Repeating regions**: gaps between backbone elements where the same tag appears with variable count (loops)
+- **Optional regions**: gaps where elements appear in some pages but not others (conditionals)
+
+This backbone/gap decomposition is shared with the FiVaTech algorithm (`westlean/child_alignment.py`), but here it serves as a practical replacement for the UTA's regular-expression transitions over child state sequences.
+
+#### 3. Recursive Template Construction
+
+For each backbone position, the aligned children from all pages are recursively merged into a sub-template. At each node:
+- **Tag and attribute names** must be identical across pages (structural agreement)
+- **Text, tail, and attribute values** are classified as **fixed** (identical across all pages) or **variable** (assigned a unique variable name)
+- **Children** are aligned and recursed into, or marked as fully variable if no common structure exists
+
+This recursive descent produces a template tree where each node is analogous to a set of k-subtree patterns in the formal framework: it captures what the local neighborhood of each position must look like.
+
+#### 4. Generalization
+
+Within repeating regions (loops), the `_relax_always_present` function clears over-constraining flags, allowing empty text values in loop body positions. Optional regions use skeleton-only matching (`check_values=False`) during extraction, analogous to the wildcard-based generalization in the g-testable algorithm: structure must match but text values are not required to match the training data.
+
+#### 5. Acceptance and Extraction
+
+A new page is accepted if it matches the template tree structure: correct tags, attribute names, and child sequence (backbone elements in order, with repeating/optional regions consuming elements in gaps). This is equivalent to the UTA acceptance criterion where all k-subtree patterns must have been seen. Fixed values are verified; variable positions have their values extracted into the output dictionary.
+
+## Connection to the Papers
+
+| Paper Concept | Our Implementation |
+|---|---|
+| k-subtree patterns (fragments of height k) | Recursive template tree nodes (each captures parent + children structure) |
+| k-root (top of tree, height k) | Root node of template tree + its immediate children |
+| k-forks (middle fragments) | Interior template nodes with their backbone children |
+| k-subtrees (bottom fragments) | Leaf-level template nodes |
+| UTA transitions `v(e) -> q` with regex over child states | Backbone + repeating/optional regions (regex-like child sequence matching) |
+| k-contextual DFA for child sequences | LCS-based child alignment with gap classification |
+| Pattern union across training pages | Simultaneous N-way merge during `_build_uta_tree` |
+| g-testable wildcard generalization | `_relax_always_present` + `check_values=False` for optional regions |
+| Acceptance: all k-subtrees in allowed set | `_matches_structure`: recursive tag/attr/children validation |
+| k parameter (precision/recall trade-off) | `k` parameter preserved for API; template tree depth provides equivalent discrimination |
+
+The key difference is that the papers use a **flat set of pattern tuples** with a DFA for child sequence matching, while our implementation uses a **recursive tree** with LCS alignment. This makes multi-slot extraction natural (every variable position extracts simultaneously) whereas the original algorithm extracts one field at a time by labeling target nodes with a special symbol *x*.
+
+## Interactive Demo
+
+<AlgorithmDemo
+  algorithm="k_testable"
+  renderViz={renderViz}
+  phaseLabels={phaseLabels}
+  defaultPages={[
+    '<div><h1>Products</h1><p class="item">Widget - $9.99</p></div>',
+    '<div><h1>Products</h1><p class="item">Sprocket - $4.99</p><p class="item">Doodad - $4</p></div>',
+    '<div><h1>Products</h1><p class="item">Gizmo - $14.99</p></div>',
+  ]}
+/>
+
+## Key Properties
+
+- **Local testability**: acceptance depends only on bounded-height neighborhoods, not global structure
+- **Positive examples only**: like the paper's algorithm, inference requires only positive examples (pages from the same template) with no negative examples needed
+- **Order-independent**: result does not depend on page ordering (simultaneous N-way merge)
+- **Configurable precision**: the k parameter is preserved for API compatibility; internally the recursive template tree provides equivalent (and often better) discrimination
+
+## Strengths and Limitations
+
+**Strengths:**
+- Sound theoretical foundation in k-testable tree languages and grammatical inference
+- Handles unranked trees natively (no binarization needed, unlike Kosala et al. 2002b)
+- Child alignment naturally detects loops and optional elements
+- Multi-slot extraction in a single pass
+
+**Limitations:**
+- Our LCS alignment is a heuristic approximation of the paper's k-contextual DFA inference for child sequences
+- The `_relax_always_present` generalization is simpler than the paper's g-testable and gl-testable schemes
+- Like the original algorithm, sensitive to structural variation in parts of the document far from the extraction targets
+
+## References
+
+- Kosala, R., Bruynooghe, M., Van den Bussche, J., & Blockeel, H. (2003). Information extraction from web documents based on local unranked tree automaton inference. *IJCAI 2003*, pp. 403-408.
+- Kosala, R., Blockeel, H., Bruynooghe, M., & Van den Bussche, J. (2006). Information extraction from structured documents using k-testable tree automaton inference. *Data & Knowledge Engineering*, 58, pp. 129-158.
+- Garcia, P. (1993). Learning k-testable tree sets from positive data. Technical Report DSIC-ii-1993-46, Universidad Politecnica de Valencia.
+- Rico-Juan, J.R., Calera-Rubio, J., & Carrasco, R.C. (2000). Probabilistic k-testable tree-languages. *ICGI 2000*, pp. 221-228.
+
+## Source Code
+
+[`westlean/algorithms/tree_automata.py`](https://github.com/freelawproject/westlean/blob/main/westlean/algorithms/tree_automata.py)
