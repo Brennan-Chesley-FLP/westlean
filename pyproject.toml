@@ -1,0 +1,23 @@
+[project]
+name = "westlean"
+version = "0.1.0"
+description = "Template inference algorithm research and interactive documentation"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "jinja2>=3.1",
+    "lxml>=5.0",
+    "pydantic>=2.10",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[dependency-groups]
+dev = [
+    "hypothesis>=6.151.9",
+    "pre-commit>=4.5.1",
+    "pytest>=9.0.2",
+    "pytest-xdist>=3.8.0",
+]
