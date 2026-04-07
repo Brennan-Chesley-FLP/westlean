@@ -68,5 +68,14 @@ class LoopBlock:
     children: tuple[TemplateNode, ...] = ()
 
 
+@dataclass(frozen=True)
+class CommentNode:
+    """An HTML comment node. Contains only text content (static or variable)."""
+
+    children: tuple[Union[TextNode, TemplateVar], ...] = ()
+
+
 # Union of every node that can appear in a template tree.
-TemplateNode = Union[TextNode, TemplateVar, Element, ConditionalBlock, LoopBlock]
+TemplateNode = Union[
+    TextNode, TemplateVar, Element, ConditionalBlock, LoopBlock, CommentNode
+]

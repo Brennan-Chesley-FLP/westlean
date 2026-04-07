@@ -15,6 +15,7 @@ from typing import Any, Sequence
 from lxml import etree
 
 from westlean.child_alignment import align_children
+from westlean.compat import element_tag
 from westlean.protocol import EmptyTemplate
 
 
@@ -80,7 +81,7 @@ def _build_uta_tree(
     sub-templates for backbone, repeating, and optional regions.
     """
     # Tags must agree
-    tags = {str(p.tag) for p in pages}
+    tags = {element_tag(p) for p in pages}
     if len(tags) != 1:
         return None
 
@@ -181,7 +182,7 @@ def _build_uta_tree(
             else:
                 end = len(cl)
             for idx in range(start, end):
-                if cl[idx].tag == region.tag:
+                if element_tag(cl[idx]) == region.tag:
                     all_repeat_elems.append(cl[idx])
 
         if all_repeat_elems:
@@ -269,7 +270,7 @@ def _matches_structure(
     attribute values.  Set to False for optional children whose templates
     are built from few examples and may be over-specific about values.
     """
-    if tpl.tag != elem.tag:
+    if tpl.tag != element_tag(elem):
         return False
     if tpl.attr_names != tuple(sorted(elem.attrib)):
         return False
@@ -301,9 +302,9 @@ def _matches_structure(
             rep_tpls = {t.tag: t for t in rep_by_gap.get(gap_idx, [])}
             opt_tpls = {t.tag: t for t in opt_by_gap.get(gap_idx, [])}
             known = set(rep_tpls) | set(opt_tpls)
-            while pi < len(elem_children) and str(elem_children[pi].tag) in known:
+            while pi < len(elem_children) and element_tag(elem_children[pi]) in known:
                 child = elem_children[pi]
-                child_tag = str(child.tag)
+                child_tag = element_tag(child)
                 if child_tag in rep_tpls:
                     if not _matches_structure(
                         rep_tpls[child_tag], child, check_values=check_values
@@ -322,7 +323,7 @@ def _matches_structure(
             if gap_idx < len(backbone):
                 if (
                     pi >= len(elem_children)
-                    or str(elem_children[pi].tag) != backbone[gap_idx].tag
+                    or element_tag(elem_children[pi]) != backbone[gap_idx].tag
                 ):
                     ok = False
                     break
@@ -370,7 +371,7 @@ class KTestableTemplate:
     def _extract_node(
         self, tpl: _UTANode, elem: etree._Element, out: dict[str, Any]
     ) -> bool:
-        if tpl.tag != elem.tag:
+        if tpl.tag != element_tag(elem):
             return False
         if tpl.attr_names != tuple(sorted(elem.attrib)):
             return False
@@ -454,7 +455,7 @@ class KTestableTemplate:
             for rtpl, rvar in rep_by_gap.get(gap_idx, []):
                 items: list[dict[str, Any]] = []
                 while pi < len(page_children) and _matches_structure(
-                    rtpl, page_children[pi]
+                    rtpl, page_children[pi], check_values=False
                 ):
                     item: dict[str, Any] = {}
                     if self._extract_node(rtpl, page_children[pi], item):
@@ -474,7 +475,7 @@ class KTestableTemplate:
                 for oc in opt_children:
                     if (
                         pi < len(page_children)
-                        and page_children[pi].tag == oc.tag
+                        and element_tag(page_children[pi]) == oc.tag
                         and _matches_structure(
                             oc, page_children[pi], check_values=False
                         )
@@ -518,7 +519,7 @@ class KTestableTemplate:
         prefix: str,
         mask: dict[str, bool],
     ) -> bool:
-        if tpl.tag != elem.tag:
+        if tpl.tag != element_tag(elem):
             return False
         if tpl.attr_names != tuple(sorted(elem.attrib)):
             return False
@@ -602,7 +603,7 @@ class KTestableTemplate:
             # Repeating → all variable
             for rtpl, _ in rep_by_gap.get(gap_idx, []):
                 while pi < len(page_children) and _matches_structure(
-                    rtpl, page_children[pi]
+                    rtpl, page_children[pi], check_values=False
                 ):
                     child_prefix = f"{prefix}/{pi}" if prefix else str(pi)
                     _mark_subtree_variable(page_children[pi], child_prefix, mask)
@@ -615,7 +616,7 @@ class KTestableTemplate:
                 for oc in opt_children:
                     if (
                         pi < len(page_children)
-                        and page_children[pi].tag == oc.tag
+                        and element_tag(page_children[pi]) == oc.tag
                         and _matches_structure(
                             oc, page_children[pi], check_values=False
                         )

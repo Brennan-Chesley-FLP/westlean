@@ -5,6 +5,7 @@ from lxml.html import tostring as html_tostring
 
 from westlean.template_ast import (
     AttributeValue,
+    CommentNode,
     ConditionalBlock,
     Element,
     LoopBlock,
@@ -82,6 +83,15 @@ def _render_node(node: TemplateNode, data: dict) -> list[etree._Element | str]:
             for child in node.children:
                 results.extend(_render_node(child, loop_data))
         return results
+
+    if isinstance(node, CommentNode):
+        pieces: list[str] = []
+        for part in node.children:
+            if isinstance(part, TextNode):
+                pieces.append(part.text)
+            elif isinstance(part, TemplateVar):
+                pieces.append(str(_resolve_path(data, part.path)))
+        return [etree.Comment("".join(pieces))]
 
     raise RenderError(f"Unknown node type: {type(node)}")  # pragma: no cover
 

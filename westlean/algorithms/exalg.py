@@ -17,6 +17,7 @@ from typing import Any, Sequence
 
 from lxml import etree
 
+from westlean.compat import element_tag
 from westlean.protocol import EmptyTemplate
 
 
@@ -107,7 +108,7 @@ def _linearize(root: etree._Element, prefix: str = "", ctx: str = "") -> list[To
 def _linearize_elem(
     elem: etree._Element, prefix: str, ctx: str, out: list[Token]
 ) -> None:
-    tag = str(elem.tag)
+    tag = element_tag(elem)
     tag_ctx = f"{ctx}/{tag}" if ctx else tag
 
     out.append(Token("open", tag, "", "", prefix, tag_ctx))
@@ -126,7 +127,7 @@ def _linearize_elem(
         out.append(
             Token(
                 "tail",
-                str(child.tag),
+                element_tag(child),
                 "",
                 child.tail or "",
                 f"{child_prefix}/tail",
@@ -1101,6 +1102,21 @@ def _rng_from_flat(
         if isinstance(elem, Literal):
             tok = elem.token
             if tok.kind == "open":
+                from westlean.compat import COMMENT_TAG
+
+                if tok.tag == COMMENT_TAG:
+                    # RELAX NG ignores comments — skip to matching close
+                    pos += 1
+                    depth = 1
+                    while pos < len(elements) and depth > 0:
+                        e = elements[pos]
+                        if isinstance(e, Literal) and e.token.tag == COMMENT_TAG:
+                            if e.token.kind == "open":
+                                depth += 1
+                            elif e.token.kind == "close":
+                                depth -= 1
+                        pos += 1
+                    continue
                 # Start a new <element name="tag">
                 el = SubElement(parent, "element", name=tok.tag)
                 pos += 1

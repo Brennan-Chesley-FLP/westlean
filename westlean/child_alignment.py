@@ -10,6 +10,8 @@ from dataclasses import dataclass
 
 from lxml import etree
 
+from westlean.compat import element_tag
+
 
 # ---------------------------------------------------------------------------
 # Result types
@@ -100,7 +102,7 @@ def _structural_key(elem: etree._Element) -> str:
     for what is structurally the same element.
     """
     attrs = tuple(sorted(elem.attrib))
-    tag = str(elem.tag)
+    tag = element_tag(elem)
     parts = [tag]
     if attrs:
         parts.append(f"[{','.join(attrs)}]")
@@ -241,7 +243,7 @@ def align_children(
         all_tags: set[str] = set()
         for gc in gap_children:
             for c in gc:
-                all_tags.add(str(c.tag))
+                all_tags.add(element_tag(c))
 
         if len(all_tags) == 1:
             tag = all_tags.pop()
@@ -263,7 +265,7 @@ def align_children(
                 )
         elif len(all_tags) > 1:
             non_empty_seqs = [
-                tuple(str(c.tag) for c in gc) for gc in gap_children if len(gc) > 0
+                tuple(element_tag(c) for c in gc) for gc in gap_children if len(gc) > 0
             ]
             if len(set(non_empty_seqs)) == 1 and any(c == 0 for c in counts):
                 optional.append(
@@ -283,19 +285,19 @@ def align_children(
                 tag_order: list[str] = []
                 for gc in gap_children:
                     for c in gc:
-                        ctag = str(c.tag)
+                        ctag = element_tag(c)
                         if ctag not in tag_order:
                             tag_order.append(ctag)
                 per_tag_counts: dict[str, list[int]] = {t: [] for t in tag_order}
                 valid = True
                 for gc in gap_children:
-                    tc = _Counter(str(c.tag) for c in gc)
+                    tc = _Counter(element_tag(c) for c in gc)
                     for t in tag_order:
                         per_tag_counts[t].append(tc.get(t, 0))
                     # Verify ordering: tags must appear in consistent order
                     seen_order: list[str] = []
                     for c in gc:
-                        ctag = str(c.tag)
+                        ctag = element_tag(c)
                         if not seen_order or seen_order[-1] != ctag:
                             seen_order.append(ctag)
                     # Check that seen_order is a subsequence of tag_order

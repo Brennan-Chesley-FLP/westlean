@@ -184,6 +184,9 @@ def _draw_varied_training(
 
     train_data = [data.draw(field_strategy(schema)) for _ in range(n)]
     _check_field_variation(schema, train_data)
+    # Reject if all data dicts are identical — algorithms can't learn
+    # anything from pages that are all the same.
+    assume(len({str(d) for d in train_data}) >= 2)
     return train_data
 
 

@@ -14,6 +14,7 @@ from typing import Any, Sequence
 from lxml import etree
 
 from westlean.child_alignment import lcs
+from westlean.compat import element_tag
 from westlean.protocol import EmptyTemplate
 
 
@@ -67,7 +68,7 @@ class _TplNode:
 def _page_to_template(elem: etree._Element) -> _TplNode:
     attr_names = tuple(sorted(elem.attrib))
     return _TplNode(
-        tag=str(elem.tag),
+        tag=element_tag(elem),
         attr_names=attr_names,
         text=(True, elem.text or ""),
         tail=(True, elem.tail or ""),
@@ -504,7 +505,7 @@ def _try_detect_regions(
     Returns (backbone, repeating_regions, optional_regions) or None.
     """
     tpl_tags = [c.tag for c in tpl_children]
-    page_tags = [str(c.tag) for c in page_children]
+    page_tags = [element_tag(c) for c in page_children]
 
     tpl_counts = Counter(tpl_tags)
     page_counts = Counter(page_tags)
@@ -531,7 +532,7 @@ def _try_detect_regions(
             ctag = next(iter(candidates))
             # Compare first TplNode's fixed text+attrs vs first page element
             first_tpl = next(c for c in tpl_children if c.tag == ctag)
-            first_page = next(c for c in page_children if c.tag == ctag)
+            first_page = next(c for c in page_children if element_tag(c) == ctag)
             tpl_text_fixed, tpl_text_val = first_tpl.text
             page_text = first_page.text or ""
             if tpl_text_fixed and tpl_text_val == page_text:
@@ -544,7 +545,7 @@ def _try_detect_regions(
                     and (not c.text[0] or c.text[1] != tpl_text_val)
                     for c in tpl_children
                 ) or any(
-                    c.tag == ctag
+                    element_tag(c) == ctag
                     and c is not first_page
                     and (c.text or "") != tpl_text_val
                     for c in page_children
@@ -602,7 +603,7 @@ def _try_detect_regions(
         for i in range(t_start, t_end):
             gap_tags.add(tpl_children[i].tag)
         for i in range(p_start, p_end):
-            gap_tags.add(str(page_children[i].tag))
+            gap_tags.add(element_tag(page_children[i]))
 
         if len(gap_tags) == 1 and max(tc, pc) > 1:
             # Repeating region — merge all gap children into one template
@@ -662,20 +663,20 @@ def _try_detect_regions(
                     if tpl_children[i].tag not in tag_order:
                         tag_order.append(tpl_children[i].tag)
                 for i in range(p_start, p_end):
-                    ptag = str(page_children[i].tag)
+                    ptag = element_tag(page_children[i])
                     if ptag not in tag_order:
                         tag_order.append(ptag)
 
                 tpl_tc = Counter(tpl_children[i].tag for i in range(t_start, t_end))
                 page_tc = Counter(
-                    str(page_children[i].tag) for i in range(p_start, p_end)
+                    element_tag(page_children[i]) for i in range(p_start, p_end)
                 )
 
                 # Validate: tags must appear in consistent order (contiguous runs)
                 valid = True
                 for seq_tags in [
                     [tpl_children[i].tag for i in range(t_start, t_end)],
-                    [str(page_children[i].tag) for i in range(p_start, p_end)],
+                    [element_tag(page_children[i]) for i in range(p_start, p_end)],
                 ]:
                     seen: list[str] = []
                     for t in seq_tags:
@@ -705,7 +706,7 @@ def _try_detect_regions(
                                 if tpl_children[i].tag == t:
                                     tag_nodes.append(tpl_children[i])
                             for i in range(p_start, p_end):
-                                if str(page_children[i].tag) == t:
+                                if element_tag(page_children[i]) == t:
                                     tag_nodes.append(
                                         _page_to_template(page_children[i])
                                     )
@@ -730,7 +731,7 @@ def _try_detect_regions(
                                         [
                                             _page_to_template(page_children[i])
                                             for i in range(p_start, p_end)
-                                            if page_children[i].tag == t
+                                            if element_tag(page_children[i]) == t
                                         ],
                                     )
                                 )
@@ -793,7 +794,9 @@ def _fold_with_regions(
         # Consume repeating regions in this gap
         for pos, rtpl, rvar in rep_by_gap.get(gap_idx, []):
             new_rtpl = rtpl
-            while pi < len(page_children) and page_children[pi].tag == rtpl.tag:
+            while (
+                pi < len(page_children) and element_tag(page_children[pi]) == rtpl.tag
+            ):
                 if rtpl.attr_names != tuple(sorted(page_children[pi].attrib)):
                     break
                 merged = _anti_unify(new_rtpl, page_children[pi], ctr)
@@ -807,19 +810,23 @@ def _fold_with_regions(
         for pos, opt_children in opt_by_gap.get(gap_idx, []):
             remaining_optional: list[_TplNode] = []
             for opt in opt_children:
-                if pi < len(page_children) and page_children[pi].tag == opt.tag:
+                if (
+                    pi < len(page_children)
+                    and element_tag(page_children[pi]) == opt.tag
+                ):
                     # Count consecutive same-tag children to detect upgrade
                     lookahead = pi + 1
                     while (
                         lookahead < len(page_children)
-                        and page_children[lookahead].tag == opt.tag
+                        and element_tag(page_children[lookahead]) == opt.tag
                     ):
                         lookahead += 1
                     if lookahead - pi > 1:
                         # Upgrade to repeating region
                         new_rtpl = opt
                         while (
-                            pi < len(page_children) and page_children[pi].tag == opt.tag
+                            pi < len(page_children)
+                            and element_tag(page_children[pi]) == opt.tag
                         ):
                             merged = _anti_unify(new_rtpl, page_children[pi], ctr)
                             if merged is None:
@@ -865,7 +872,7 @@ def _fold_with_regions(
 def _anti_unify(tpl: _TplNode, page: etree._Element, ctr: _Counter) -> _TplNode | None:
     """Return the LGG of *tpl* and *page*, or ``None`` if roots are incompatible."""
 
-    if tpl.tag != page.tag:
+    if tpl.tag != element_tag(page):
         return None
     page_attrs = tuple(sorted(page.attrib))
     if tpl.attr_names != page_attrs:
@@ -1093,6 +1100,12 @@ def _rng_node(node: _TplNode, parent: Any) -> None:
     """
     from xml.etree.ElementTree import SubElement
 
+    from westlean.compat import COMMENT_TAG
+
+    # RELAX NG validators ignore comments, so skip comment nodes.
+    if node.tag == COMMENT_TAG:
+        return
+
     el = SubElement(parent, "element", name=node.tag)
 
     # --- Attributes ---
@@ -1138,19 +1151,31 @@ def _rng_node(node: _TplNode, parent: Any) -> None:
         # (not inside <mixed> to avoid interleave+text conflict).
         SubElement(el, "ref", name="anyContent")
     elif child_patterns:
-        # Use <mixed><group>...</group></mixed> for mixed content.
-        mixed = SubElement(el, "mixed")
-        group = SubElement(mixed, "group")
-        for kind, data in child_patterns:
-            if kind == "child":
-                _rng_node(data, group)
-            elif kind == "repeat":
-                zm = SubElement(group, "zeroOrMore")
-                _rng_node(data, zm)
-            elif kind == "optional":
-                opt = SubElement(group, "optional")
-                for oc in data:
-                    _rng_node(oc, opt)
+        # Filter out comment nodes (RELAX NG ignores comments).
+        from westlean.compat import COMMENT_TAG
+
+        non_comment = [
+            (k, d)
+            for k, d in child_patterns
+            if not (k == "child" and d.tag == COMMENT_TAG)
+        ]
+        if non_comment:
+            # Use <mixed><group>...</group></mixed> for mixed content.
+            mixed = SubElement(el, "mixed")
+            group = SubElement(mixed, "group")
+            for kind, data in non_comment:
+                if kind == "child":
+                    _rng_node(data, group)
+                elif kind == "repeat":
+                    zm = SubElement(group, "zeroOrMore")
+                    _rng_node(data, zm)
+                elif kind == "optional":
+                    opt = SubElement(group, "optional")
+                    for oc in data:
+                        _rng_node(oc, opt)
+        else:
+            # All children were comments — just allow text
+            SubElement(el, "text")
     else:
         # Leaf element — just allow text
         SubElement(el, "text")
@@ -1194,7 +1219,7 @@ class AntiUnifiedTemplate:
     def _extract_node(
         self, tpl: _TplNode, elem: etree._Element, out: dict[str, Any]
     ) -> bool:
-        if tpl.tag != elem.tag:
+        if tpl.tag != element_tag(elem):
             return False
         if tpl.attr_names != tuple(sorted(elem.attrib)):
             return False
@@ -1278,7 +1303,10 @@ class AntiUnifiedTemplate:
             # Consume repeating regions in this gap
             for rtpl, rvar in rep_by_gap.get(gap_idx, []):
                 items: list[dict[str, Any]] = []
-                while pi < len(page_children) and page_children[pi].tag == rtpl.tag:
+                while (
+                    pi < len(page_children)
+                    and element_tag(page_children[pi]) == rtpl.tag
+                ):
                     if not _structurally_compatible(rtpl, page_children[pi]):
                         break
                     item: dict[str, Any] = {}
@@ -1296,7 +1324,10 @@ class AntiUnifiedTemplate:
             # Consume optional regions in this gap
             for opt_children in opt_by_gap.get(gap_idx, []):
                 for oc in opt_children:
-                    if pi < len(page_children) and page_children[pi].tag == oc.tag:
+                    if (
+                        pi < len(page_children)
+                        and element_tag(page_children[pi]) == oc.tag
+                    ):
                         self._extract_node(oc, page_children[pi], out)
                         pi += 1
 
@@ -1336,7 +1367,7 @@ class AntiUnifiedTemplate:
         prefix: str,
         mask: dict[str, bool],
     ) -> bool:
-        if tpl.tag != elem.tag:
+        if tpl.tag != element_tag(elem):
             return False
         if tpl.attr_names != tuple(sorted(elem.attrib)):
             return False
@@ -1420,7 +1451,10 @@ class AntiUnifiedTemplate:
         for gap_idx in range(len(backbone) + 1):
             # Repeating regions -> all variable
             for rtpl, _ in rep_by_gap.get(gap_idx, []):
-                while pi < len(page_children) and page_children[pi].tag == rtpl.tag:
+                while (
+                    pi < len(page_children)
+                    and element_tag(page_children[pi]) == rtpl.tag
+                ):
                     if not _structurally_compatible(rtpl, page_children[pi]):
                         break
                     child_prefix = f"{prefix}/{pi}" if prefix else str(pi)
@@ -1432,7 +1466,10 @@ class AntiUnifiedTemplate:
             # Optional regions -> all variable
             for opt_children in opt_by_gap.get(gap_idx, []):
                 for oc in opt_children:
-                    if pi < len(page_children) and page_children[pi].tag == oc.tag:
+                    if (
+                        pi < len(page_children)
+                        and element_tag(page_children[pi]) == oc.tag
+                    ):
                         child_prefix = f"{prefix}/{pi}" if prefix else str(pi)
                         _mark_subtree_variable(page_children[pi], child_prefix, mask)
                         if page_children[pi].tail:
@@ -1477,7 +1514,7 @@ def _structurally_compatible(tpl: _TplNode, elem: etree._Element) -> bool:
     children tag sequence — enough to reject pages from a different
     template without full extraction.
     """
-    if tpl.tag != elem.tag:
+    if tpl.tag != element_tag(elem):
         return False
     if tpl.attr_names != tuple(sorted(elem.attrib)):
         return False
@@ -1508,9 +1545,9 @@ def _structurally_compatible(tpl: _TplNode, elem: etree._Element) -> bool:
             rep_tpls = {t.tag: t for t in rep_by_gap.get(gap_idx, [])}
             opt_tpls = {t.tag: t for t in opt_by_gap.get(gap_idx, [])}
             known = set(rep_tpls) | set(opt_tpls)
-            while pi < len(elem_children) and str(elem_children[pi].tag) in known:
+            while pi < len(elem_children) and element_tag(elem_children[pi]) in known:
                 child = elem_children[pi]
-                child_tag = str(child.tag)
+                child_tag = element_tag(child)
                 if child_tag in rep_tpls:
                     if not _structurally_compatible(rep_tpls[child_tag], child):
                         ok = False
@@ -1525,7 +1562,7 @@ def _structurally_compatible(tpl: _TplNode, elem: etree._Element) -> bool:
             if gap_idx < len(backbone):
                 if (
                     pi >= len(elem_children)
-                    or elem_children[pi].tag != backbone[gap_idx].tag
+                    or element_tag(elem_children[pi]) != backbone[gap_idx].tag
                 ):
                     ok = False
                     break
@@ -1540,7 +1577,7 @@ def _structurally_compatible(tpl: _TplNode, elem: etree._Element) -> bool:
         if len(elem_children) != len(tpl.children):
             return False
         for ctpl, celem in zip(tpl.children, elem_children):
-            if ctpl.tag != celem.tag:
+            if ctpl.tag != element_tag(celem):
                 return False
     elif list(elem):
         return False

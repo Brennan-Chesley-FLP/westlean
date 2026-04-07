@@ -19,8 +19,10 @@ from westlean.data_schema import (
     StringField,
     UrlField,
 )
+from westlean.compat import COMMENT_TAG
 from westlean.template_ast import (
     AttributeValue,
+    CommentNode,
     ConditionalBlock,
     Element,
     LoopBlock,
@@ -276,6 +278,7 @@ def _template_node(
     choices += ["element", "element"]
     if accepts_text and allow_conditionals:
         choices += ["conditional"]
+    choices += ["comment"]
     # Loops are NOT offered here — they are placed exclusively by _element()
     # in loop mode, which ensures all loop siblings are Elements (preventing
     # lxml text/tail redistribution when loops are empty).
@@ -343,6 +346,20 @@ def _leaf_or_element(
                 valid_child_tags, depth - 1, used_names, schema_fields, loop_context
             )
         )
+
+    if kind == "comment":
+        if draw(st.booleans()):
+            # Variable-text comment
+            name = _fresh_name("comment_var", used_names)
+            schema_fields[name] = StringField()
+            if loop_context:
+                path = f"{loop_context}.{name}"
+            else:
+                path = name
+            return CommentNode(children=(TemplateVar(path=path),))
+        else:
+            # Fixed-text comment
+            return CommentNode(children=(TextNode(text=draw(_SAFE_TEXT)),))
 
     raise ValueError(f"Unknown node kind: {kind}")  # pragma: no cover
 
@@ -543,6 +560,8 @@ def _has_loop_generation_hazard(template: TemplateNode) -> bool:
                     loop_body_tags.add(lc.tag)
         elif isinstance(child, Element):
             sibling_tags.add(child.tag)
+        elif isinstance(child, CommentNode):
+            sibling_tags.add(COMMENT_TAG)
         elif isinstance(child, (TextNode, TemplateVar, ConditionalBlock)):
             if has_loop or any(isinstance(c, LoopBlock) for c in children):
                 return True
@@ -594,6 +613,9 @@ def has_loop_alignment_hazard(template: TemplateNode) -> bool:
                     loop_tags.add(lc.tag)
         elif isinstance(child, Element):
             sibling_tags.add(child.tag)
+            last_was_loop = False
+        elif isinstance(child, CommentNode):
+            sibling_tags.add(COMMENT_TAG)
             last_was_loop = False
         else:
             pass  # TextNode/TemplateVar/ConditionalBlock don't create DOM elements

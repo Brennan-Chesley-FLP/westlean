@@ -20,6 +20,7 @@ from typing import Any, Sequence
 
 from lxml import etree
 
+from westlean.compat import element_tag
 from westlean.protocol import EmptyTemplate
 
 
@@ -133,7 +134,7 @@ def linearize(root: etree._Element, prefix: str = "") -> list[Token]:
 
 
 def _linearize_elem(elem: etree._Element, prefix: str, out: list[Token]) -> None:
-    tag = str(elem.tag)
+    tag = element_tag(elem)
     out.append(Token("open", tag, "", "", prefix))
 
     for attr_name in sorted(elem.attrib):
@@ -1036,6 +1037,20 @@ def _rng_from_ufre(
         if isinstance(elem, Literal):
             tok = elem.token
             if tok.kind == "open":
+                from westlean.compat import COMMENT_TAG
+
+                if tok.tag == COMMENT_TAG:
+                    pos += 1
+                    depth = 1
+                    while pos < len(elements) and depth > 0:
+                        e = elements[pos]
+                        if isinstance(e, Literal) and e.token.tag == COMMENT_TAG:
+                            if e.token.kind == "open":
+                                depth += 1
+                            elif e.token.kind == "close":
+                                depth -= 1
+                        pos += 1
+                    continue
                 el = SubElement(parent, "element", name=tok.tag)
                 pos += 1
                 pos = _rng_from_ufre(elements, pos, el)

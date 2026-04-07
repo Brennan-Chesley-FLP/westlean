@@ -14,6 +14,7 @@ from typing import Any, Sequence
 from lxml import etree
 
 from westlean.child_alignment import align_children
+from westlean.compat import element_tag
 from westlean.protocol import EmptyTemplate
 
 
@@ -122,7 +123,7 @@ def _merge_trees(
     so the result is independent of input order.
     """
     # Tags must agree
-    tags = {str(p.tag) for p in pages}
+    tags = {element_tag(p) for p in pages}
     if len(tags) != 1:
         return None
 
@@ -223,7 +224,7 @@ def _merge_trees(
             else:
                 end = len(cl)
             for idx in range(start, end):
-                if cl[idx].tag == region.tag:
+                if element_tag(cl[idx]) == region.tag:
                     all_repeat_elems.append(cl[idx])
 
         if all_repeat_elems:
@@ -318,7 +319,7 @@ class FiVaTechTemplate:
     def _extract_node(
         self, pat: _PatternNode, elem: etree._Element, out: dict[str, Any]
     ) -> bool:
-        if pat.tag != elem.tag:
+        if pat.tag != element_tag(elem):
             return False
         if pat.attr_names != tuple(sorted(elem.attrib)):
             return False
@@ -422,7 +423,7 @@ class FiVaTechTemplate:
                 for oc in opt_children:
                     if (
                         pi < len(page_children)
-                        and page_children[pi].tag == oc.tag
+                        and element_tag(page_children[pi]) == oc.tag
                         and _matches_repeat_structure(
                             oc, page_children[pi], check_values=False
                         )
@@ -466,7 +467,7 @@ class FiVaTechTemplate:
         prefix: str,
         mask: dict[str, bool],
     ) -> bool:
-        if pat.tag != elem.tag:
+        if pat.tag != element_tag(elem):
             return False
         if pat.attr_names != tuple(sorted(elem.attrib)):
             return False
@@ -563,7 +564,7 @@ class FiVaTechTemplate:
                 for oc in opt_children:
                     if (
                         pi < len(page_children)
-                        and page_children[pi].tag == oc.tag
+                        and element_tag(page_children[pi]) == oc.tag
                         and _matches_repeat_structure(
                             oc, page_children[pi], check_values=False
                         )
@@ -621,7 +622,7 @@ def _matches_repeat_structure(
     attribute values.  Set to False for optional children whose templates
     are built from few examples and may be over-specific about values.
     """
-    if rtpl.tag != elem.tag:
+    if rtpl.tag != element_tag(elem):
         return False
     if rtpl.attr_names != tuple(sorted(elem.attrib)):
         return False
@@ -654,9 +655,9 @@ def _matches_repeat_structure(
             rep_tpls = {t.tag: t for t in rep_by_gap.get(gap_idx, [])}
             opt_tpls = {t.tag: t for t in opt_by_gap.get(gap_idx, [])}
             known = set(rep_tpls) | set(opt_tpls)
-            while pi < len(elem_children) and str(elem_children[pi].tag) in known:
+            while pi < len(elem_children) and element_tag(elem_children[pi]) in known:
                 child = elem_children[pi]
-                child_tag = str(child.tag)
+                child_tag = element_tag(child)
                 # Recursively validate against the region template
                 if child_tag in rep_tpls:
                     if not _matches_repeat_structure(
@@ -676,7 +677,7 @@ def _matches_repeat_structure(
             if gap_idx < len(backbone):
                 if (
                     pi >= len(elem_children)
-                    or str(elem_children[pi].tag) != backbone[gap_idx].tag
+                    or element_tag(elem_children[pi]) != backbone[gap_idx].tag
                 ):
                     ok = False
                     break
@@ -694,7 +695,7 @@ def _matches_repeat_structure(
         if len(elem_children) != len(rtpl.children):
             return False
         for ctpl, celem in zip(rtpl.children, elem_children):
-            if ctpl.tag != celem.tag:
+            if ctpl.tag != element_tag(celem):
                 return False
     elif list(elem):
         # Template has no children (leaf or variable) but element does
