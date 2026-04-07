@@ -344,6 +344,41 @@ class TestKTestableV2:
         assert tpl_small.extract(test_bad) is None
         assert tpl_large.extract(test_bad) is None
 
+    def test_loop_with_variable_children(self):
+        """Loop rows whose cells have variable children should still match.
+
+        When the third <td> has an <a class="x"> in one page but a bare <a>
+        in another, the attribute name mismatch makes _build_uta_tree give up
+        on that cell's children, falling back to children=None (fully
+        variable).  The structural matcher must then accept page <td> elements
+        that have children.
+        """
+        pages = [
+            fragment_fromstring(
+                "<table><tbody>"
+                '<tr><td>A</td><td>1</td><td><a class="x">link1</a></td></tr>'
+                '<tr><td>B</td><td>2</td><td><a class="x">link2</a></td></tr>'
+                "</tbody></table>"
+            ),
+            fragment_fromstring(
+                "<table><tbody>"
+                "<tr><td>C</td><td>3</td><td><a>link3</a></td></tr>"
+                "</tbody></table>"
+            ),
+        ]
+        tpl = KTestableInferer(k=2).infer(pages)
+        test = fragment_fromstring(
+            "<table><tbody>"
+            '<tr><td>X</td><td>9</td><td><a class="y">link4</a></td></tr>'
+            '<tr><td>Y</td><td>8</td><td><a class="z">link5</a></td></tr>'
+            "</tbody></table>"
+        )
+        result = tpl.extract(test)
+        assert result is not None, "Failed to match loop with variable-children cells"
+        loop_values = [v for v in result.values() if isinstance(v, list)]
+        assert len(loop_values) == 1
+        assert len(loop_values[0]) == 2
+
 
 class TestKTestableV2Props(InferenceTestSuite):
     """Property-based tests with loop/conditional templates."""

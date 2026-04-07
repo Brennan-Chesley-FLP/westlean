@@ -342,7 +342,7 @@ def _matches_structure(
         for ctpl, celem in zip(tpl.children, elem_children):
             if not _matches_structure(ctpl, celem, check_values=check_values):
                 return False
-    elif list(elem):
+    elif list(elem) and not tpl.children_var:
         return False
 
     return True
